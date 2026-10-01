@@ -85,10 +85,19 @@ export function EditStaffDialog({ staff, open, onOpenChange }: EditStaffDialogPr
 
       await updateStaff.mutateAsync({ id: staff.id, ...form, email: form.email.trim() });
 
-      // Keep the member's access role in sync with their staff role
+      // Keep the member's access role in sync with their staff role (server-enforced)
       if (hasLinkedAccount && form.role !== staff.role && currentOrg?.org_id) {
-        await supabase.from("org_members").update({ role: form.role as any })
-          .eq("org_id", currentOrg.org_id).eq("user_id", staff.user_id!);
+        const res = await supabase.functions.invoke("manage-staff-user", {
+          body: {
+            action: "update_role",
+            org_id: currentOrg.org_id,
+            user_id: staff.user_id,
+            role: form.role,
+          },
+        });
+        if (res.error || res.data?.error) {
+          throw new Error(res.data?.error || res.error?.message || "Could not update this staff member's role.");
+        }
       }
 
       if (hasLinkedAccount && (emailChanged || wantsPassword)) {

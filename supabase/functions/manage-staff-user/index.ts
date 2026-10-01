@@ -272,6 +272,62 @@ serve(async (req) => {
       });
     }
 
+    if (action === "update_role") {
+      if (!user_id || !role) {
+        return new Response(JSON.stringify({ error: "user_id and role are required" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Managers can never appoint admins or managers
+      if ((role === "admin" || role === "manager") && !canAppointAdmin) {
+        return new Response(JSON.stringify({ error: "Managers cannot appoint admins or managers" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Verify the target user belongs to the same org
+      const { data: targetMembership } = await supabaseAdmin
+        .from("org_members")
+        .select("id, role")
+        .eq("user_id", user_id)
+        .eq("org_id", org_id)
+        .maybeSingle();
+
+      if (!targetMembership) {
+        return new Response(JSON.stringify({ error: "User not found in this organization" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Only the clinic owner or a super admin can change an owner's or admin's role
+      if (["owner", "admin"].includes(targetMembership.role) && !isOwnerOrSuper) {
+        return new Response(JSON.stringify({ error: "Only the clinic owner or a super admin can change an admin's role" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { error: roleError } = await supabaseAdmin
+        .from("org_members")
+        .update({ role })
+        .eq("id", targetMembership.id);
+
+      if (roleError) {
+        return new Response(JSON.stringify({ error: roleError.message }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({ error: "Invalid action" }), {
       status: 400,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
