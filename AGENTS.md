@@ -10,3 +10,4 @@
 <!-- LOVABLE:END -->
 
 - Branch-assigned non-admin staff automatically enter their sole sub-branch after sign-in, avoiding an unnecessary clinic picker.
+- The installed app uses a self-retiring `/sw.js` only to clear legacy PWA caches; app pages remain network-fresh.
