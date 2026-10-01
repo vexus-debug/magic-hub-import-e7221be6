@@ -765,6 +765,23 @@
   background: hsl(var(--sidebar-background));
 }
 
+/* The mobile dashboard sidebar renders in a portal at the end of <body>,
+   outside .dashboard-theme, so it would otherwise fall back to the root
+   navy tokens. Re-declare the dashboard sidebar tokens on it so it matches
+   the desktop rail (same values in light and dark — .dashboard-theme.dark
+   does not override sidebar tokens). */
+.dashboard-sidebar[data-sidebar="sidebar"][data-mobile="true"] {
+  --sidebar-background: 197 43% 6%;
+  --sidebar-foreground: 168 21% 94%;
+  --sidebar-primary: 172 84% 39%;
+  --sidebar-primary-foreground: 197 43% 6%;
+  --sidebar-accent: 186 51% 12%;
+  --sidebar-accent-foreground: 168 21% 94%;
+  --sidebar-border: 172 84% 39% / 0.18;
+  --sidebar-ring: 172 84% 39%;
+  background: hsl(var(--sidebar-background));
+}
+
 .dashboard-theme .sing-widget,
 .dashboard-theme .glass-card {
   border-color: hsl(var(--widget-border));
