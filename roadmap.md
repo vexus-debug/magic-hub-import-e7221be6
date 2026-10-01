@@ -1,10 +1,6 @@
-- [x] Import repository as-is and install dependencies
-- [x] Assistant: require sign-in + clinic membership, look up role
-- [x] Assistant: limit actions per role
-- [x] Assistant: ask for missing details, never invent, confirm before saving
-- [ ] Test assistant with a signed-in user in each role (needs a test account per role)
-- [ ] Add assistant actions for eye clinic, lab tests, scans and pharmacy
-- [x] Public dental page: Starter / Smart / Pro pricing tiers
-- [ ] Public eye clinic page: still shows old ₦15,000 / ₦30,000 / ₦60,000 (needs confirmed prices)
-- [x] Remove marketing section from all dashboards (keep public site unchanged)
-- [x] Inventory: track stock usage with dates, branch transfers, and downloadable inventory/stock reports
+# Roadmap
+
+- [x] Redesign the staff page with compact mobile-friendly directory cards.
+- [x] Keep Add Staff, help, staff details, status, role, phone, and visible Edit actions.
+- [x] Automatically send staff assigned to one sub-branch into that branch after login.
+- [x] Verify the redesigned staff directory layout at desktop and phone sizes; branch routing is source-verified because this external login cannot be automated here.
