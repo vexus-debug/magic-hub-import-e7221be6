@@ -139,6 +139,7 @@ export function useDentalDashboardPulse() {
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const orgId = currentOrg?.org_id;
+  const canSeeFinancials = ["owner", "admin", "manager", "receptionist", "accountant"].includes(currentOrg?.role || "");
 
   return useQuery({
     queryKey: ["dental-dashboard-pulse", orgId, user?.id],
@@ -153,8 +154,12 @@ export function useDentalDashboardPulse() {
         supabase.from("treatments").select("id", { count: "exact", head: true }).eq("org_id", orgId!),
         supabase.from("patient_recalls").select("id, due_date, status").eq("org_id", orgId!).lte("due_date", recallCutoff).neq("status", "completed"),
         (supabase as any).from("waiting_list").select("id, status, check_in_time, chair, patients(first_name, last_name)").eq("org_id", orgId!).gte("created_at", `${today}T00:00:00`).order("check_in_time"),
-        supabase.from("invoices").select("id, total, status, due_date").eq("org_id", orgId!).in("status", ["pending", "overdue"]),
-        supabase.from("payments").select("amount, payment_date").eq("org_id", orgId!).gte("payment_date", weekAgo).lte("payment_date", today),
+        canSeeFinancials
+          ? supabase.from("invoices").select("id, total, status, due_date").eq("org_id", orgId!).in("status", ["pending", "overdue"])
+          : Promise.resolve({ data: [] }),
+        canSeeFinancials
+          ? supabase.from("payments").select("amount, payment_date").eq("org_id", orgId!).gte("payment_date", weekAgo).lte("payment_date", today)
+          : Promise.resolve({ data: [] }),
       ]);
 
       const staff = staffRes.data || [];
