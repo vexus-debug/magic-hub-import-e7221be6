@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Branch-assigned non-admin staff automatically enter their sole sub-branch after sign-in, avoiding an unnecessary clinic picker.

@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil, UserCog } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Plus, Pencil, Search, UserCog } from "lucide-react";
 import { useStaff, type StaffMember } from "@/hooks/useStaff";
 import { useOrg } from "@/hooks/useOrg";
 import { AddStaffDialog } from "@/components/dashboard/AddStaffDialog";
@@ -12,15 +12,6 @@ import { PageHeader } from "@/components/dashboard/PageHeader";
 import { EmptyState } from "@/components/dashboard/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { motion } from "framer-motion";
-
-const roleColors: Record<string, string> = {
-  admin: "bg-secondary/10 text-secondary",
-  dentist: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
-  assistant: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
-  hygienist: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-  receptionist: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
-  accountant: "bg-rose-500/10 text-rose-700 dark:text-rose-400",
-};
 
 const stagger = {
   container: { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } },
@@ -31,10 +22,20 @@ export default function StaffPage() {
   const { data: staff = [], isLoading } = useStaff();
   const { currentOrg } = useOrg();
   const orgRole = currentOrg?.role || "";
-  const isAdmin = orgRole === "owner" || orgRole === "admin";
+  const canManageStaff = ["owner", "admin", "manager"].includes(orgRole);
 
   const [addOpen, setAddOpen] = useState(false);
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
+  const [query, setQuery] = useState("");
+  const visibleStaff = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return staff;
+    return staff.filter((member) =>
+      [member.full_name, member.role, member.specialty, member.phone]
+        .filter(Boolean)
+        .some((value) => value?.toLowerCase().includes(term)),
+    );
+  }, [query, staff]);
 
   return (
     <div className="space-y-6">
@@ -73,50 +74,68 @@ export default function StaffPage() {
           },
         }}
       >
-        {isAdmin && (
-          <Button data-tour="staff-add" size="sm" className="bg-secondary hover:bg-secondary/90 shadow-lg shadow-secondary/20" onClick={() => setAddOpen(true)}>
+        {canManageStaff && (
+          <Button data-tour="staff-add" size="sm" className="h-10 rounded-lg bg-secondary px-4 font-semibold shadow-lg shadow-secondary/20 hover:bg-secondary/90" onClick={() => setAddOpen(true)}>
             <Plus className="mr-2 h-4 w-4" /> Add Staff
           </Button>
         )}
       </PageHeader>
 
+      <div className="relative max-w-xl">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search staff by name, role or phone"
+          aria-label="Search staff"
+          className="h-11 rounded-lg border-border/70 bg-card/80 pl-10 shadow-sm"
+        />
+      </div>
+
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid max-w-4xl gap-3 lg:grid-cols-2">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="glass-card"><CardContent className="p-5"><div className="flex gap-4"><Skeleton className="h-12 w-12 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-4 w-32" /><Skeleton className="h-3 w-20" /><Skeleton className="h-5 w-16 rounded-full" /></div></div></CardContent></Card>
+            <Card key={i} className="overflow-hidden rounded-lg border-border/70 bg-card"><CardContent className="p-4"><div className="flex items-center gap-4"><Skeleton className="h-14 w-14 rounded-full" /><div className="flex-1 space-y-2"><Skeleton className="h-4 w-32" /><Skeleton className="h-3 w-20" /><Skeleton className="h-5 w-24 rounded-full" /></div><Skeleton className="h-12 w-14 rounded-lg" /></div></CardContent></Card>
           ))}
         </div>
       ) : staff.length === 0 ? (
         <EmptyState icon={UserCog} title="No staff members" description="Add team members to manage your clinic staff." actionLabel="Add Staff" onAction={() => setAddOpen(true)} />
+      ) : visibleStaff.length === 0 ? (
+        <EmptyState icon={Search} title="No matching staff" description="Try a different name, role, or phone number." />
       ) : (
-        <motion.div data-tour="staff-grid" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" variants={stagger.container} initial="hidden" animate="visible">
-          {staff.map((member) => (
+        <motion.div data-tour="staff-grid" className="grid max-w-4xl gap-3 lg:grid-cols-2" variants={stagger.container} initial="hidden" animate="visible">
+          {visibleStaff.map((member) => (
             <motion.div key={member.id} variants={stagger.item}>
-              <Card className="glass-card hover:shadow-lg hover:shadow-secondary/5 transition-all duration-300 group hover:border-secondary/20">
-                <CardContent className="p-5">
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-12 w-12 ring-2 ring-border/30 group-hover:ring-secondary/30 transition-all">
-                      <AvatarFallback className="bg-gradient-to-br from-secondary/20 to-secondary/5 text-secondary font-semibold">
+              <Card className="group overflow-hidden rounded-lg border-border/70 bg-card shadow-sm transition-all duration-200 hover:border-secondary/40 hover:shadow-md hover:shadow-secondary/5">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div className="relative shrink-0">
+                      <Avatar className="h-14 w-14 border border-secondary/20 bg-accent ring-0 transition-colors group-hover:border-secondary/40">
+                        <AvatarFallback className="bg-accent text-secondary text-base font-bold">
                         {member.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                      </AvatarFallback>
-                    </Avatar>
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-card ${member.status === "active" ? "bg-success" : "bg-muted-foreground"}`} aria-hidden="true" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate group-hover:text-secondary transition-colors">{member.full_name}</p>
-                      <p className="text-xs text-muted-foreground">{member.specialty || member.role}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <span data-tour="staff-role-badge" className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${roleColors[member.role] || "bg-muted text-muted-foreground"}`}>
-                          {member.role}
-                        </span>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${member.status === "active" ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                          <span className={`h-1.5 w-1.5 rounded-full ${member.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/50"}`} />
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-base font-semibold text-foreground transition-colors group-hover:text-secondary">{member.full_name}</p>
+                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${member.status === "active" ? "border-success/20 bg-success/10 text-success" : "border-border bg-muted text-muted-foreground"}`}>
                           {member.status}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2 font-mono">{member.phone}</p>
+                      <p className="mt-0.5 truncate text-sm text-muted-foreground">{member.specialty || member.role.replace(/_/g, " ")}</p>
+                      <div className="mt-2 flex min-w-0 items-center gap-2">
+                        <span data-tour="staff-role-badge" className="inline-flex shrink-0 items-center rounded-md bg-background/70 px-2 py-0.5 text-[10px] font-semibold capitalize text-secondary">
+                          {member.role.replace(/_/g, " ")}
+                        </span>
+                        {member.phone && <span className="truncate font-mono text-[10px] text-muted-foreground">{member.phone}</span>}
+                      </div>
                     </div>
-                    {isAdmin && (
-                      <Button data-tour="staff-edit" variant="ghost" size="icon" className="h-7 w-7 shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity" onClick={() => setEditStaff(member)}>
-                        <Pencil className="h-3.5 w-3.5" />
+                    {canManageStaff && (
+                      <Button data-tour="staff-edit" variant="outline" className="h-12 w-14 shrink-0 flex-col gap-1 rounded-lg border-border/80 bg-background/40 px-2 text-[11px] font-semibold hover:border-secondary/40 hover:bg-secondary hover:text-secondary-foreground sm:w-auto sm:flex-row sm:px-3" onClick={() => setEditStaff(member)} aria-label={`Edit ${member.full_name}`}>
+                        <Pencil className="h-4 w-4" />
+                        <span>Edit</span>
                       </Button>
                     )}
                   </div>

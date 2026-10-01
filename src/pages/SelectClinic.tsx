@@ -64,8 +64,18 @@ export default function SelectClinic() {
       navigate("/admin", { replace: true });
       return;
     }
-    if (orgMemberships.length === 1) {
-      navigate(`/clinic/${orgMemberships[0].org_slug}/dashboard`, { replace: true });
+    const soleMembership = orgMemberships.length === 1 ? orgMemberships[0] : null;
+    if (soleMembership) {
+      navigate(`/clinic/${soleMembership.org_slug}/dashboard`, { replace: true });
+      return;
+    }
+    // Branch staff should never have to choose between the main clinic and
+    // the single branch where they work. Owners/admins retain the clinic picker.
+    const assignedBranches = orgMemberships.filter(
+      (membership) => membership.parent_org_id && !["owner", "admin"].includes(membership.role),
+    );
+    if (assignedBranches.length === 1) {
+      navigate(`/clinic/${assignedBranches[0].org_slug}/dashboard`, { replace: true });
       return;
     }
     // Return to the last clinic used on this device
