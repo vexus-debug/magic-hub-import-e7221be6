@@ -1,682 +1,423 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { format } from "date-fns";
+import { motion } from "framer-motion";
 import {
-  Users, CalendarDays, CreditCard, TrendingUp, UserPlus, CalendarPlus, FileText,
-  Clock, Activity, ArrowUpRight, ArrowDownRight, Zap, ChevronRight, Stethoscope, CalendarCheck,
-  CircleDot, BarChart3,
+  Activity,
+  ArrowRight,
+  CalendarCheck,
+  CalendarDays,
+  Check,
+  CircleDollarSign,
+  Clock3,
+  CreditCard,
+  ListChecks,
+  Sparkles,
+  Stethoscope,
+  TrendingUp,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Area, AreaChart, RadialBarChart, RadialBar, Cell,
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  RadialBar,
+  RadialBarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
-import {
-  useDashboardStats, useWeeklyAppointments, useRevenueData,
-  useTodaySchedule, useRecentActivity, useCurrentUserName, useTreatmentDistribution,
-} from "@/hooks/useDashboardData";
-import { format } from "date-fns";
-import { useOrg } from "@/hooks/useOrg";
-import { hasPageAccess } from "@/config/roleAccess";
-import { AnimatedCounter } from "@/components/dashboard/AnimatedCounter";
-import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { cn } from "@/lib/utils";
-import { EyeTodayScreen } from "@/components/dashboard/eye/EyeTodayScreen";
 import { PageTourButton } from "@/components/dashboard/tour/PageTourButton";
+import { EyeTodayScreen } from "@/components/dashboard/eye/EyeTodayScreen";
+import {
+  useCurrentUserName,
+  useDashboardStats,
+  useDentalDashboardPulse,
+  useRevenueData,
+  useTodaySchedule,
+  useWeeklyAppointments,
+} from "@/hooks/useDashboardData";
+import { useOrg } from "@/hooks/useOrg";
+import { cn } from "@/lib/utils";
 
-/* ─── Colour maps ────────────────────────────────────────────── */
-const statusColors: Record<string, string> = {
-  scheduled:    "bg-primary/10 text-primary border-primary/20",
-  "in-progress": "bg-amber-500/10 text-amber-700 border-amber-500/20",
-  completed:    "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
-  cancelled:    "bg-red-500/10 text-red-700 border-red-500/20",
+type DashboardMode = "owner" | "dentist" | "receptionist";
+type ScheduleItem = {
+  id: string;
+  staffId: string;
+  time: string;
+  patientName: string;
+  dentist: string;
+  chair: string;
+  treatment: string;
+  status: string;
 };
-const statusDots: Record<string, string> = {
-  scheduled:    "bg-primary",
-  "in-progress": "bg-amber-500",
-  completed:    "bg-emerald-500",
-  cancelled:    "bg-red-500",
-};
-const activityColors: Record<string, string> = {
-  appointment:  "bg-primary/10 text-primary",
-  payment:      "bg-emerald-500/10 text-emerald-600",
-  patient:      "bg-primary/10 text-primary",
-  lab:          "bg-amber-500/10 text-amber-600",
-  prescription: "bg-rose-500/10 text-rose-600",
-};
-const activityIcons: Record<string, typeof Activity> = {
-  appointment:  CalendarDays,
-  payment:      CreditCard,
-  patient:      Users,
-  lab:          FileText,
-  prescription: FileText,
+
+const iconStroke = 1.8;
+const tooltipStyle = {
+  backgroundColor: "hsl(var(--card))",
+  border: "1px solid hsl(var(--border))",
+  borderRadius: "8px",
+  fontSize: "12px",
 };
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-NG", {
-    style: "currency", currency: "NGN", minimumFractionDigits: 0,
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
   }).format(amount);
 }
 
-/* ─── Animation variants ─────────────────────────────────────── */
-const stagger = {
-  container: { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } },
-  item: {
-    hidden: { opacity: 0, y: 18, scale: 0.97 },
-    visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.45, ease: [0.25, 0.1, 0.25, 1] as const } },
-  },
-};
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
-/* ─── Tooltip style ──────────────────────────────────────────── */
-const tooltipStyle = {
-  backgroundColor: "hsl(var(--card))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: "10px",
-  fontSize: "12px",
-  boxShadow: "0 8px 24px -4px hsl(var(--foreground) / 0.08)",
-};
+function roleMode(role: string): DashboardMode {
+  if (["owner", "admin", "manager"].includes(role)) return "owner";
+  if (role === "dentist") return "dentist";
+  return "receptionist";
+}
 
-/* ─── Radial gauge component ────────────────────────────────── */
-function RadialGauge({ value, max, label, color }: { value: number; max: number; label: string; color: string }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  const data = [{ value: pct, fill: color }];
+function ProgressRing({ completed, total }: { completed: number; total: number }) {
+  const percentage = total ? Math.round((completed / total) * 100) : 0;
   return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="relative h-[90px] w-[90px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <RadialBarChart cx="50%" cy="50%" innerRadius="72%" outerRadius="100%" startAngle={90} endAngle={-270} data={data} barSize={8}>
-            <RadialBar background={{ fill: "hsl(var(--muted))" }} dataKey="value" cornerRadius={10} />
-          </RadialBarChart>
-        </ResponsiveContainer>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-lg font-bold text-foreground tabular-nums">{pct}%</span>
-        </div>
+    <div className="relative h-28 w-28 shrink-0" aria-label={`${percentage}% of today's appointments completed`}>
+      <ResponsiveContainer width="100%" height="100%">
+        <RadialBarChart
+          cx="50%"
+          cy="50%"
+          innerRadius="74%"
+          outerRadius="100%"
+          startAngle={90}
+          endAngle={-270}
+          data={[{ value: percentage }]}
+        >
+          <RadialBar background={{ fill: "hsl(var(--muted))" }} dataKey="value" fill="hsl(var(--primary))" cornerRadius={12} />
+        </RadialBarChart>
+      </ResponsiveContainer>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-bold tabular-nums text-foreground">{percentage}%</span>
+        <span className="text-[10px] font-semibold uppercase text-muted-foreground">complete</span>
       </div>
-      <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</span>
     </div>
   );
 }
 
-/* ─── Greeting helper ────────────────────────────────────────── */
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
+function Sparkline({ data }: { data: number[] }) {
+  const points = data.map((value, index) => ({ index, value }));
+  return (
+    <div className="h-10 w-24" aria-hidden="true">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={points}>
+          <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   Dashboard Home — Premium Bento Layout
-═══════════════════════════════════════════════════════════════ */
-function StandardDashboardHome() {
-  const [revPeriod, setRevPeriod] = useState<"6M" | "1Y">("6M");
+function KpiTile({ label, value, detail, icon: Icon, series }: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: typeof Users;
+  series: number[];
+}) {
+  return (
+    <div className="w-[248px] shrink-0 border-r border-border/70 px-5 py-3 first:pl-0 last:border-r-0 sm:w-auto sm:min-w-[215px] sm:flex-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Icon className="h-4 w-4" strokeWidth={iconStroke} />
+            <p className="truncate text-[11px] font-semibold uppercase">{label}</p>
+          </div>
+          <p className="mt-3 truncate text-2xl font-bold tabular-nums text-foreground">{value}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">{detail}</p>
+        </div>
+        <Sparkline data={series} />
+      </div>
+    </div>
+  );
+}
 
-  const { data: stats } = useDashboardStats();
-  const { data: weeklyData } = useWeeklyAppointments();
-  const { data: revenueData } = useRevenueData();
-  const { data: todayAppointments } = useTodaySchedule();
-  const { data: activities } = useRecentActivity();
-  const { data: userName } = useCurrentUserName();
-  const { data: treatmentDist, isLoading: treatmentDistLoading } = useTreatmentDistribution();
-  const { currentOrg, basePath } = useOrg();
-  const orgRole = currentOrg?.role || "receptionist";
+function ToothMotif() {
+  return (
+    <div className="grid grid-cols-4 gap-1" aria-hidden="true">
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => (
+        <span key={item} className="h-4 w-3 rounded-t-full border border-primary/25 bg-primary/5" />
+      ))}
+    </div>
+  );
+}
 
-  const s = stats || { totalPatients: 0, todayAppointments: 0, pendingPayments: 0, monthlyRevenue: 0 };
-  const schedule = todayAppointments || [];
-  const recentActivities = activities || [];
-
-  const canSeePatients     = hasPageAccess(orgRole, "patients", currentOrg?.clinic_type);
-  const canSeeBilling      = hasPageAccess(orgRole, "billing", currentOrg?.clinic_type);
-  const canSeeAppointments = hasPageAccess(orgRole, "appointments", currentOrg?.clinic_type);
-
-  /* Quick actions */
-  const quickActions = [
-    canSeePatients    && { to: `${basePath}/patients`,     icon: UserPlus,    title: "Register Patient" },
-    canSeeAppointments && { to: `${basePath}/appointments`, icon: CalendarPlus, title: "Book Appointment" },
-    canSeeBilling     && { to: `${basePath}/billing`,      icon: FileText,    title: "Create Invoice" },
-  ].filter(Boolean) as any[];
-
-  /* Derived widget data */
-  const completedToday = schedule.filter((a) => a.status === "completed").length;
-  const inProgressToday = schedule.filter((a) => a.status === "in-progress").length;
-  const cancelledToday = schedule.filter((a) => a.status === "cancelled").length;
-  const completionPct = schedule.length ? Math.round((completedToday / schedule.length) * 100) : 0;
-  const nowHHmm = format(new Date(), "HH:mm");
-  const nextAppointment =
-    schedule.find((a) => a.status === "scheduled" && a.time >= nowHHmm) ||
-    schedule.find((a) => a.status === "scheduled");
-  const revSeries = revenueData || [];
-  const avgMonthlyRevenue = revSeries.length
-    ? Math.round(revSeries.reduce((sum, r) => sum + r.revenue, 0) / revSeries.length)
-    : 0;
-  const bestMonth = revSeries.length
-    ? revSeries.reduce((best, r) => (r.revenue > best.revenue ? r : best), revSeries[0])
-    : null;
+function OnboardingChecklist({ basePath, activeDentists, treatmentCount, patientCount }: {
+  basePath: string;
+  activeDentists: number;
+  treatmentCount: number;
+  patientCount: number;
+}) {
+  const steps = [
+    { label: "Add a dentist", done: activeDentists > 0, to: `${basePath}/staff` },
+    { label: "Add your services", done: treatmentCount > 0, to: `${basePath}/treatments` },
+    { label: "Register your first patient", done: patientCount > 0, to: `${basePath}/patients` },
+  ];
+  const done = steps.filter((step) => step.done).length;
 
   return (
-    <div className="space-y-5">
-
-      {/* ── Row 1: Compact Welcome Strip ──────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-1" data-tour="page-header">
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-primary to-clinic-teal-light flex items-center justify-center shadow-md shadow-primary/20">
-                <Stethoscope className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-foreground tracking-tight leading-tight">
-                  {getGreeting()}, {userName || "Doctor"}
-                </h1>
-                <p className="text-xs text-muted-foreground">
-                  {format(new Date(), "EEEE, MMMM d")} · {schedule.length} appointment{schedule.length !== 1 ? "s" : ""} today
-                </p>
-              </div>
+    <div className="overflow-hidden rounded-lg bg-gradient-to-r from-primary/45 via-border to-primary/20 p-px">
+      <div className="grid gap-6 rounded-[7px] bg-card p-5 md:grid-cols-[1fr_auto] md:items-center">
+        <div>
+          <div className="mb-4 flex items-center gap-3">
+            <ToothMotif />
+            <div>
+              <p className="text-xs font-semibold uppercase text-primary">Clinic setup</p>
+              <h2 className="text-lg font-bold text-foreground">Open your digital front door</h2>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0" data-tour="dashboard-quick-actions">
-            <PageTourButton />
-            {quickActions.map((action: any) => (
-              <Button key={action.to} size="sm" variant="outline" className="gap-1.5 rounded-lg text-xs border-border hover:border-primary/40 hover:bg-primary/5 transition-all" asChild>
-                <Link to={action.to}>
-                  <action.icon className="h-3.5 w-3.5 text-primary" />
-                  {action.title}
-                </Link>
-              </Button>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {steps.map((step) => (
+              <Link key={step.label} to={step.to} className="flex items-center gap-2 rounded-md border border-border/70 p-3 text-sm transition-colors hover:bg-muted/60">
+                <span className={cn("flex h-5 w-5 items-center justify-center rounded-full border", step.done ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground")}>
+                  {step.done && <Check className="h-3 w-3" strokeWidth={2} />}
+                </span>
+                <span className={step.done ? "text-muted-foreground line-through" : "font-medium text-foreground"}>{step.label}</span>
+              </Link>
             ))}
           </div>
         </div>
-      </motion.div>
+        <div className="text-left md:text-right">
+          <p className="text-3xl font-bold tabular-nums text-foreground">{done}/3</p>
+          <p className="text-xs text-muted-foreground">setup steps complete</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      {/* ── Row 2: Bento KPI Grid ──────────────────────────────── */}
-      <motion.div
-        className="grid gap-3 grid-cols-2 lg:grid-cols-4"
-        data-tour="dashboard-kpi-cards"
-        variants={stagger.container}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Patient count — large number card */}
-        {canSeePatients && (
-          <motion.div variants={stagger.item}>
-            <Card className="relative overflow-hidden border-border/50 bg-card h-full group hover:shadow-lg hover:border-primary/20 transition-all duration-300">
-              <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex items-center justify-between">
-                  <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Users className="h-4.5 w-4.5 text-primary" />
-                  </div>
-                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                    <ArrowUpRight className="h-3 w-3" /> +12%
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <p className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                    <AnimatedCounter value={s.totalPatients} />
-                  </p>
-                  <p className="text-[11px] font-medium text-muted-foreground mt-0.5 uppercase tracking-wider">Total Patients</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+function StandardDashboardHome() {
+  const { data: stats } = useDashboardStats();
+  const { data: weeklyData = [] } = useWeeklyAppointments();
+  const { data: revenueData = [] } = useRevenueData();
+  const { data: allSchedule = [] } = useTodaySchedule();
+  const { data: pulse } = useDentalDashboardPulse();
+  const { data: userName } = useCurrentUserName();
+  const { currentOrg, basePath } = useOrg();
+  const mode = roleMode(currentOrg?.role || "receptionist");
 
-        {/* Today's appointments — radial gauge */}
-        {canSeeAppointments && (
-          <motion.div variants={stagger.item}>
-            <Card className="relative overflow-hidden border-border/50 bg-card h-full group hover:shadow-lg hover:border-emerald-500/20 transition-all duration-300">
-              <CardContent className="p-5 flex flex-col items-center justify-center h-full">
-                <RadialGauge
-                  value={schedule.filter(a => a.status === "completed").length}
-                  max={Math.max(s.todayAppointments, 1)}
-                  label="Completed"
-                  color="hsl(var(--success))"
-                />
-                <div className="text-center mt-2">
-                  <p className="text-2xl font-black text-foreground tabular-nums">
-                    <AnimatedCounter value={s.todayAppointments} />
-                  </p>
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Today's Appointments</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+  const schedule = useMemo(() => {
+    const items = allSchedule as ScheduleItem[];
+    if (mode !== "dentist") return items;
+    if (!pulse?.assignedStaffId) return [];
+    return items.filter((item) => item.staffId === pulse.assignedStaffId);
+  }, [allSchedule, mode, pulse?.assignedStaffId]);
 
-        {/* Pending Payments — accent warning card */}
-        {canSeeBilling && (
-          <motion.div variants={stagger.item}>
-            <Card className="relative overflow-hidden border-border/50 bg-card h-full group hover:shadow-lg hover:border-gold/20 transition-all duration-300">
-              <CardContent className="p-5 flex flex-col justify-between h-full">
-                <div className="flex items-center justify-between">
-                  <div className="h-9 w-9 rounded-xl bg-gold/10 flex items-center justify-center">
-                    <CreditCard className="h-4.5 w-4.5 text-gold-deep" />
-                  </div>
-                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-red-600 bg-red-500/10 px-2 py-0.5 rounded-full">
-                    <ArrowDownRight className="h-3 w-3" /> -5%
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <p className="text-3xl font-black tracking-tight text-foreground tabular-nums">
-                    <AnimatedCounter value={s.pendingPayments} />
-                  </p>
-                  <p className="text-[11px] font-medium text-muted-foreground mt-0.5 uppercase tracking-wider">Pending Payments</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+  const completed = schedule.filter((item) => item.status === "completed").length;
+  const activeQueue = (pulse?.queue || []).filter((item) => !["completed", "cancelled"].includes(item.status));
+  const now = format(new Date(), "HH:mm");
+  const nextAppointment = schedule.find((item) => item.status === "scheduled" && item.time >= now) || schedule.find((item) => item.status === "scheduled");
+  const weeklySeries = weeklyData.map((day) => day.count);
+  const revenueSeries = revenueData.map((month) => month.revenue);
+  const paymentSeries = (pulse?.paymentSeries || []).map((day) => day.value);
+  const totalWeekly = weeklySeries.reduce((sum, value) => sum + value, 0);
+  const emptyDay = weeklyData.filter((day) => day.count === Math.min(...weeklySeries)).at(0)?.day;
+  const s = stats || { totalPatients: 0, todayAppointments: 0, pendingPayments: 0, monthlyRevenue: 0 };
 
-        {/* Monthly Revenue — hero metric */}
-        {canSeeBilling && (
-          <motion.div variants={stagger.item}>
-            <Card className="relative overflow-hidden border-border/50 h-full group hover:shadow-lg hover:border-primary/20 transition-all duration-300">
-              {/* Gradient shimmer bg */}
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.06] via-transparent to-clinic-teal-light/[0.06] opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <CardContent className="relative p-5 flex flex-col justify-between h-full">
-                <div className="flex items-center justify-between">
-                  <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <TrendingUp className="h-4.5 w-4.5 text-primary" />
-                  </div>
-                  <div className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                    <ArrowUpRight className="h-3 w-3" /> +8.2%
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <p className="text-2xl font-black tracking-tight text-foreground tabular-nums">
-                    <AnimatedCounter value={s.monthlyRevenue} formatter={formatCurrency} />
-                  </p>
-                  <p className="text-[11px] font-medium text-muted-foreground mt-0.5 uppercase tracking-wider">Revenue ({format(new Date(), "MMM")})</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-      </motion.div>
+  const hero = mode === "owner"
+    ? { eyebrow: "Clinic pulse", title: `${schedule.length} appointments shape today`, action: "Review clinic", to: `${basePath}/appointments`, icon: Activity }
+    : mode === "dentist"
+      ? { eyebrow: "Your clinical day", title: nextAppointment ? `${nextAppointment.patientName} is next` : "Your chair is clear", action: "Open schedule", to: `${basePath}/appointments`, icon: Stethoscope }
+      : { eyebrow: "Front desk now", title: activeQueue.length ? `${activeQueue.length} patients need attention` : "The queue is clear", action: activeQueue.length ? "Manage queue" : "Book appointment", to: activeQueue.length ? `${basePath}/waiting-list` : `${basePath}/appointments`, icon: ListChecks };
 
-      {/* ── Row 2b: Insight widgets ─────────────────────────────── */}
-      <motion.div
-        className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-        data-tour="dashboard-insight-widgets"
-        variants={stagger.container}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Next up */}
-        {canSeeAppointments && (
-          <motion.div variants={stagger.item} className="min-w-0">
-            <Card className="border-border/50 bg-card h-full overflow-hidden">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Clock className="h-3.5 w-3.5 text-primary" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Next Up</p>
-                </div>
-                {nextAppointment ? (
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">{nextAppointment.patientName}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">
-                      {nextAppointment.time} · {nextAppointment.treatment} · {nextAppointment.chair}
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Nothing left today</p>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+  const kpis = mode === "owner"
+    ? [
+        { label: "Monthly revenue", value: formatCurrency(s.monthlyRevenue), detail: "Collected this month", icon: TrendingUp, series: revenueSeries },
+        { label: "Patients", value: s.totalPatients.toLocaleString(), detail: "Clinic-wide total", icon: Users, series: weeklySeries },
+        { label: "Today", value: s.todayAppointments.toString(), detail: `${completed} completed`, icon: CalendarDays, series: weeklySeries },
+        { label: "Outstanding", value: formatCurrency(pulse?.pendingInvoiceValue || 0), detail: `${pulse?.pendingInvoiceCount || 0} invoices`, icon: CreditCard, series: paymentSeries },
+      ]
+    : mode === "dentist"
+      ? [
+          { label: "Your patients", value: schedule.length.toString(), detail: "Booked today", icon: Users, series: weeklySeries },
+          { label: "Completed", value: completed.toString(), detail: `${Math.max(schedule.length - completed, 0)} remaining`, icon: CalendarCheck, series: weeklySeries },
+          { label: "Current chair", value: nextAppointment?.chair || "—", detail: nextAppointment ? `Next at ${nextAppointment.time}` : "No patient waiting", icon: Stethoscope, series: weeklySeries },
+          { label: "Recalls", value: (pulse?.recallsDue || 0).toString(), detail: "Due within 14 days", icon: Clock3, series: weeklySeries },
+        ]
+      : [
+          { label: "Live queue", value: activeQueue.length.toString(), detail: "Patients checked in", icon: ListChecks, series: weeklySeries },
+          { label: "Appointments", value: schedule.length.toString(), detail: `${schedule.filter((item) => item.status === "scheduled").length} upcoming`, icon: CalendarDays, series: weeklySeries },
+          { label: "Collected today", value: formatCurrency(pulse?.todayCollections || 0), detail: "Recorded payments", icon: CircleDollarSign, series: paymentSeries },
+          { label: "Pending invoices", value: (pulse?.pendingInvoiceCount || 0).toString(), detail: formatCurrency(pulse?.pendingInvoiceValue || 0), icon: CreditCard, series: paymentSeries },
+        ];
 
-        {/* Today's progress */}
-        {canSeeAppointments && (
-          <motion.div variants={stagger.item} className="min-w-0">
-            <Card className="border-border/50 bg-card h-full overflow-hidden">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap className="h-3.5 w-3.5 text-emerald-600" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Today's Progress</p>
-                </div>
-                <p className="text-lg font-bold tabular-nums text-foreground">
-                  {completedToday}/{schedule.length || 0} <span className="text-xs font-medium text-muted-foreground">completed</span>
-                </p>
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden mt-2">
-                  <motion.div
-                    className="h-full rounded-full bg-emerald-500"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${completionPct}%` }}
-                    transition={{ duration: 0.7, ease: "easeOut" }}
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground mt-1.5">
-                  {inProgressToday} in progress · {cancelledToday} cancelled
-                </p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+  const dailyInsight = totalWeekly === 0
+    ? "As appointments build, I’ll spot quieter days and opportunities to improve chair use."
+    : emptyDay
+      ? `${emptyDay} has the lightest appointment load this week; consider moving recalls into those open slots.`
+      : "Today’s schedule is balanced across the clinic.";
 
-        {/* Revenue pace */}
-        {canSeeBilling && (
-          <motion.div variants={stagger.item} className="min-w-0">
-            <Card className="border-border/50 bg-card h-full overflow-hidden">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="h-3.5 w-3.5 text-primary" />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Revenue Pace</p>
-                </div>
-                <p className="text-lg font-bold tabular-nums text-foreground truncate">{formatCurrency(avgMonthlyRevenue)}</p>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  6-month average · best {bestMonth ? `${bestMonth.month} (${formatCurrency(bestMonth.revenue)})` : "—"}
-                </p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-      </motion.div>
+  const actions = mode === "owner"
+    ? [
+        { count: pulse?.recallsDue || 0, text: "recalls due", action: "Send reminders", to: `${basePath}/patients`, icon: Clock3 },
+        { count: pulse?.pendingInvoiceCount || 0, text: "invoices outstanding", action: "Review billing", to: `${basePath}/billing`, icon: CreditCard },
+        { count: Math.max(8 - schedule.length, 0), text: "open slots today", action: "Open calendar", to: `${basePath}/appointments`, icon: CalendarDays },
+      ]
+    : mode === "dentist"
+      ? [
+          { count: Math.max(schedule.length - completed, 0), text: "patients remaining", action: "View schedule", to: `${basePath}/appointments`, icon: CalendarCheck },
+          { count: pulse?.recallsDue || 0, text: "recalls due soon", action: "Review patients", to: `${basePath}/patients`, icon: Users },
+        ]
+      : [
+          { count: activeQueue.length, text: "patients in queue", action: "Manage arrivals", to: `${basePath}/waiting-list`, icon: ListChecks },
+          { count: pulse?.pendingInvoiceCount || 0, text: "payments to follow up", action: "Open billing", to: `${basePath}/billing`, icon: CreditCard },
+          { count: schedule.filter((item) => item.status === "scheduled").length, text: "appointments ahead", action: "Confirm bookings", to: `${basePath}/appointments`, icon: CalendarDays },
+        ];
 
+  const showOnboarding = mode === "owner" && s.totalPatients === 0;
 
+  return (
+    <div className="space-y-6 pb-4">
+      <div className="flex items-start justify-between gap-4" data-tour="page-header">
+        <div>
+          <p className="text-sm text-muted-foreground">{format(new Date(), "EEEE, MMMM d")}</p>
+          <h1 className="mt-1 text-2xl font-bold text-foreground">{getGreeting()}, {userName || "there"}</h1>
+        </div>
+        <PageTourButton />
+      </div>
 
-      {/* ── Row 3: Revenue Chart (wide) + Treatment Breakdown (narrow) ── */}
-      {(canSeeAppointments || canSeeBilling) && (
-        <motion.div
-          className="grid gap-4 lg:grid-cols-5"
-          variants={stagger.container}
-          initial="hidden"
-          animate="visible"
-        >
-          {/* Revenue trend — sleek area */}
-          {canSeeBilling && (
-            <motion.div variants={stagger.item} className="lg:col-span-3 min-w-0">
-              <Card className="border-border/50 bg-card h-full hover:shadow-lg transition-shadow duration-300">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                        <BarChart3 className="h-4 w-4 text-primary" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-sm font-semibold" data-tour="dashboard-revenue-chart">Revenue Overview</CardTitle>
-                        <CardDescription className="text-[11px]">Monthly trend (₦)</CardDescription>
-                      </div>
-                    </div>
-                    <div className="flex gap-0.5 bg-muted/60 rounded-lg p-0.5">
-                      {(["6M", "1Y"] as const).map((label) => (
-                        <button
-                          key={label}
-                          onClick={() => setRevPeriod(label)}
-                          className={cn(
-                            "px-3 py-1 text-[11px] font-semibold rounded-md transition-all",
-                            revPeriod === label
-                              ? "bg-card text-primary shadow-sm"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-2">
-                  <ResponsiveContainer width="100%" height={240}>
-                    <AreaChart data={revenueData || []}>
-                      <defs>
-                        <linearGradient id="revGrad2" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" vertical={false} />
-                      <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} axisLine={false} tickLine={false} />
-                      <YAxis
-                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-                        axisLine={false} tickLine={false} width={44}
-                        tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
-                      />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [formatCurrency(v), "Revenue"]} />
-                      <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#revGrad2)" dot={{ r: 3, fill: "hsl(var(--primary))", strokeWidth: 0 }} activeDot={{ r: 5, fill: "hsl(var(--primary))" }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-
-          {/* Treatment breakdown — horizontal bars */}
-          <motion.div variants={stagger.item} className="lg:col-span-2 min-w-0">
-            <Card className="border-border/50 bg-card h-full hover:shadow-lg transition-shadow duration-300">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-gold/10 flex items-center justify-center">
-                    <CircleDot className="h-4 w-4 text-gold-deep" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-sm font-semibold" data-tour="dashboard-treatment-breakdown">Treatments</CardTitle>
-                    <CardDescription className="text-[11px]">Distribution by type</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0 space-y-3.5">
-                {treatmentDistLoading ? (
-                  <div className="space-y-3.5">
-                    {[0, 1, 2, 3].map((i) => (
-                      <div key={i} className="space-y-1.5">
-                        <div className="h-3 w-24 bg-muted rounded animate-pulse" />
-                        <div className="h-2 w-full bg-muted rounded-full animate-pulse" />
-                      </div>
-                    ))}
-                  </div>
-                ) : (treatmentDist || []).length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-10 text-center">
-                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                      <BarChart3 className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <p className="text-sm text-muted-foreground">No treatment data yet</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Distribution appears once appointments are linked to treatments.
-                    </p>
-                  </div>
-                ) : (treatmentDist || []).map((item) => (
-                  <div key={item.name} className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-foreground">{item.name}</span>
-                      <span className="font-bold text-foreground tabular-nums">{item.value}% <span className="font-medium text-muted-foreground">({item.count})</span></span>
-                    </div>
-                    <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full rounded-full"
-                        style={{ background: item.fill }}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${item.value}%` }}
-                        transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </motion.div>
+      {showOnboarding && (
+        <OnboardingChecklist
+          basePath={basePath}
+          activeDentists={pulse?.activeDentists || 0}
+          treatmentCount={pulse?.treatmentCount || 0}
+          patientCount={s.totalPatients}
+        />
       )}
 
-      {/* ── Row 4: Timeline Schedule + Weekly Heatmap + Activity ── */}
-      <div className="grid gap-4 lg:grid-cols-12">
-
-        {/* Today's Schedule — Timeline Cards */}
-        {canSeeAppointments && (
-          <Card className="lg:col-span-5 min-w-0 overflow-hidden border-border/50 bg-card hover:shadow-lg transition-shadow duration-300">
-
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                    <CalendarDays className="h-4 w-4 text-emerald-600" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-sm font-semibold" data-tour="dashboard-today-schedule">Today's Schedule</CardTitle>
-                    <CardDescription className="text-[11px]">
-                      {schedule.filter(a => a.status === "completed").length} done · {schedule.filter(a => a.status === "scheduled").length} upcoming
-                    </CardDescription>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" className="text-primary hover:text-primary text-xs gap-1" asChild>
-                  <Link to={`${basePath}/appointments`}>
-                    View all <ChevronRight className="h-3 w-3" />
-                  </Link>
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-0 pb-4 max-h-[380px] overflow-y-auto scroll-momentum">
-              {schedule.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 gap-3">
-                  <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-                    <CalendarDays className="h-5 w-5 text-muted-foreground" />
-                  </div>
-                  <p className="text-sm text-muted-foreground">No appointments today</p>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to={`${basePath}/appointments`}>Book Appointment</Link>
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {schedule.slice(0, 8).map((apt, i) => {
-                    const initials = apt.patientName.split(" ").map((n: string) => n[0]).join("").slice(0, 2);
-                    return (
-                      <motion.div
-                        key={apt.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.04 }}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 hover:bg-muted/60 border border-transparent hover:border-border/50 transition-all group"
-                      >
-                        {/* Time pill */}
-                        <div className="flex flex-col items-center justify-center bg-card border border-border/60 rounded-lg px-2 py-1.5 min-w-[52px] shadow-sm">
-                          <span className="text-xs font-bold text-foreground tabular-nums leading-none">{apt.time}</span>
-                        </div>
-                        {/* Patient info */}
-                        <Avatar className="h-8 w-8 shrink-0">
-                          <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
-                            {initials}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-foreground truncate">{apt.patientName}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{apt.treatment} · {apt.dentist}</p>
-                        </div>
-                        {/* Status dot */}
-                        <span className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold border",
-                          statusColors[apt.status] || ""
-                        )}>
-                          <span className={cn("h-1.5 w-1.5 rounded-full", statusDots[apt.status] || "")} />
-                          {apt.status.replace("-", " ")}
-                        </span>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Weekly Appointments — Vertical bars with day labels */}
-        {canSeeAppointments && (
-          <motion.div
-            className="lg:col-span-4 min-w-0"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="border-border/50 bg-card h-full hover:shadow-lg transition-shadow duration-300">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <CalendarCheck className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-sm font-semibold">This Week</CardTitle>
-                      <CardDescription className="text-[11px]">Appointment volume</CardDescription>
-                    </div>
-                  </div>
-                  <Button variant="ghost" size="sm" className="text-primary text-xs gap-1" asChild>
-                    <Link to={`${basePath}/appointments`}>
-                      Calendar <ChevronRight className="h-3 w-3" />
-                    </Link>
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="pt-2">
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={weeklyData || []} barCategoryGap="24%">
-                    <defs>
-                      <linearGradient id="barGrad2" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.9} />
-                        <stop offset="100%" stopColor="hsl(var(--clinic-teal-light))" stopOpacity={0.5} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border/20" vertical={false} />
-                    <XAxis dataKey="day" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} axisLine={false} tickLine={false} width={24} />
-                    <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="count" fill="url(#barGrad2)" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
-        {/* Activity Feed — Compact Timeline */}
-        <Card className="lg:col-span-3 min-w-0 overflow-hidden border-border/50 bg-card hover:shadow-lg transition-shadow duration-300">
-          <CardHeader className="pb-3">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Activity className="h-4 w-4 text-primary" />
-              </div>
-              <div>
-                <CardTitle className="text-sm font-semibold" data-tour="dashboard-activity-feed">Activity</CardTitle>
-                <CardDescription className="text-[11px]">Latest updates</CardDescription>
-              </div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg bg-gradient-to-br from-primary/60 via-primary/20 to-border p-px shadow-[0_18px_48px_-28px_hsl(var(--primary)/0.65)]">
+        <div className="grid gap-5 rounded-[7px] bg-card p-5 md:grid-cols-[1fr_auto] md:items-center md:p-7">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-primary">
+              <hero.icon className="h-4 w-4" strokeWidth={iconStroke} />
+              <span className="text-xs font-semibold uppercase">{hero.eyebrow}</span>
             </div>
+            <h2 className="mt-3 text-2xl font-bold text-foreground md:text-3xl">{hero.title}</h2>
+            <div className="mt-3 flex min-h-10 items-center gap-3">
+              {nextAppointment ? (
+                <>
+                  <Avatar className="h-9 w-9"><AvatarFallback className="bg-primary/10 text-xs font-bold text-primary">{nextAppointment.patientName.split(" ").map((name) => name[0]).join("").slice(0, 2)}</AvatarFallback></Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">{nextAppointment.time} · {nextAppointment.treatment}</p>
+                    <p className="truncate text-xs text-muted-foreground">{nextAppointment.dentist} · {nextAppointment.chair}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">No more scheduled patients today.</p>
+              )}
+            </div>
+            <Button asChild className="mt-5">
+              <Link to={hero.to}>{hero.action}<ArrowRight className="h-4 w-4" strokeWidth={iconStroke} /></Link>
+            </Button>
+          </div>
+          <ProgressRing completed={completed} total={schedule.length} />
+        </div>
+      </motion.div>
+
+      <div className="overflow-x-auto border-y border-border/70 py-2 scroll-momentum" data-tour="dashboard-kpi-cards">
+        <div className="flex min-w-max sm:min-w-0">
+          {kpis.map((kpi) => <KpiTile key={kpi.label} {...kpi} />)}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.75fr)]">
+        <Card className="border-border/60 bg-card">
+          <CardHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-base">{mode === "owner" ? "Clinic momentum" : mode === "dentist" ? "Your patient flow" : "Today’s arrivals"}</CardTitle>
+              <CardDescription>{mode === "owner" ? "Appointments this week" : "The working list for today"}</CardDescription>
+            </div>
+            <Button asChild variant="ghost" size="sm"><Link to={`${basePath}/appointments`}>View all<ArrowRight className="h-4 w-4" /></Link></Button>
           </CardHeader>
-          <CardContent className="pt-0 pb-3 max-h-[340px] overflow-y-auto scroll-momentum">
-            {recentActivities.length === 0 ? (
-              <div className="flex flex-col items-center py-8 gap-2">
-                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
-                  <Activity className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <p className="text-sm text-muted-foreground">No recent activity</p>
+          <CardContent>
+            {mode === "owner" ? (
+              <div className="h-72">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={weeklyData}>
+                    <defs><linearGradient id="weekFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.24} /><stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/50" />
+                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                    <YAxis allowDecimals={false} axisLine={false} tickLine={false} width={28} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Area type="monotone" dataKey="count" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#weekFill)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            ) : schedule.length === 0 ? (
+              <div className="flex h-72 flex-col items-center justify-center gap-4 text-center">
+                <ToothMotif />
+                <div><p className="font-semibold text-foreground">Nothing scheduled yet</p><p className="mt-1 text-sm text-muted-foreground">New appointments will appear here.</p></div>
               </div>
             ) : (
-              <div className="space-y-0.5">
-                {recentActivities.map((activity) => {
-                  const Icon = activityIcons[activity.event_type] || Activity;
-                  const colorClass = activityColors[activity.event_type] || "bg-muted text-muted-foreground";
-                  return (
-                    <div key={activity.id} className="timeline-item flex gap-3 pb-3.5">
-                      <div className={cn("h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ring-2 ring-card", colorClass)}>
-                        <Icon className="h-3 w-3" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-medium leading-snug">{activity.description}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {format(new Date(activity.created_at), "MMM d, h:mm a")}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="space-y-2">
+                {schedule.slice(0, 7).map((appointment) => (
+                  <div key={appointment.id} className="flex items-center gap-3 border-b border-border/60 py-3 last:border-0">
+                    <span className="w-12 shrink-0 text-sm font-bold tabular-nums text-foreground">{appointment.time}</span>
+                    <span className={cn("h-2 w-2 shrink-0 rounded-full", appointment.status === "completed" ? "bg-primary" : "bg-muted-foreground/50")} />
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-foreground">{appointment.patientName}</p><p className="truncate text-xs text-muted-foreground">{appointment.treatment} · {appointment.chair}</p></div>
+                    <span className="text-xs capitalize text-muted-foreground">{appointment.status.replace("-", " ")}</span>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
         </Card>
+
+        <div className="space-y-4">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-2 text-primary"><Sparkles className="h-4 w-4" strokeWidth={iconStroke} /><p className="text-xs font-semibold uppercase">Daily insight</p></div>
+              <p className="mt-3 text-sm font-medium leading-6 text-foreground">{dailyInsight}</p>
+              <p className="mt-3 text-[11px] text-muted-foreground">Based on this clinic’s schedule only</p>
+            </CardContent>
+          </Card>
+          <div className="space-y-2">
+            {actions.map((item) => (
+              <Link key={item.text} to={item.to} className="group flex items-center gap-3 rounded-lg border border-border/70 bg-card p-4 transition-colors hover:border-primary/30 hover:bg-primary/5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-primary"><item.icon className="h-4 w-4" strokeWidth={iconStroke} /></div>
+                <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground"><span className="tabular-nums">{item.count}</span> {item.text}</p><p className="mt-0.5 text-xs font-medium text-primary">{item.action}</p></div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" strokeWidth={iconStroke} />
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
 
+      {mode === "owner" && (
+        <Card className="border-border/60 bg-card">
+          <CardHeader><CardTitle className="text-base">Revenue trend</CardTitle><CardDescription>Collections over the last six months</CardDescription></CardHeader>
+          <CardContent className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={revenueData}>
+                <defs><linearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.22} /><stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} /></linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/50" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                <YAxis axisLine={false} tickLine={false} width={48} tickFormatter={(value) => `${Math.round(value / 1000)}k`} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [formatCurrency(value), "Revenue"]} />
+                <Area type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#revenueFill)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

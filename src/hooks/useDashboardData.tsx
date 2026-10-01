@@ -115,13 +115,14 @@ export function useTodaySchedule() {
 
       const { data } = await supabase
         .from("appointments")
-        .select("id, appointment_time, status, chair, notes, patients(first_name, last_name), staff(full_name), treatments(name)")
+        .select("id, appointment_time, status, chair, notes, staff_id, patients(first_name, last_name), staff(full_name), treatments(name)")
         .eq("org_id", orgId!)
         .eq("appointment_date", today)
         .order("appointment_time");
 
       return (data || []).map((a: any) => ({
         id: a.id,
+        staffId: a.staff_id,
         time: a.appointment_time?.slice(0, 5) || "",
         patientName: `${a.patients?.first_name || ""} ${a.patients?.last_name || ""}`.trim() || "Unknown",
         dentist: a.staff?.full_name || "Unassigned",
@@ -129,6 +130,62 @@ export function useTodaySchedule() {
         treatment: a.treatments?.name || a.notes || "-",
         status: a.status || "scheduled",
       }));
+    },
+  });
+}
+
+/** Role-aware operational data used by the dental home screen. */
+export function useDentalDashboardPulse() {
+  const { currentOrg } = useOrg();
+  const { user } = useAuth();
+  const orgId = currentOrg?.org_id;
+  const canSeeFinancials = ["owner", "admin", "manager", "receptionist", "accountant"].includes(currentOrg?.role || "");
+
+  return useQuery({
+    queryKey: ["dental-dashboard-pulse", orgId, user?.id],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      const weekAgo = format(new Date(Date.now() - 6 * 86400000), "yyyy-MM-dd");
+      const recallCutoff = format(new Date(Date.now() + 14 * 86400000), "yyyy-MM-dd");
+
+      const [staffRes, treatmentsRes, recallsRes, queueRes, invoicesRes, paymentsRes] = await Promise.all([
+        supabase.from("staff").select("id, user_id, role, status").eq("org_id", orgId!),
+        supabase.from("treatments").select("id", { count: "exact", head: true }).eq("org_id", orgId!),
+        supabase.from("patient_recalls").select("id, due_date, status").eq("org_id", orgId!).lte("due_date", recallCutoff).neq("status", "completed"),
+        (supabase as any).from("waiting_list").select("id, status, check_in_time, chair, patients(first_name, last_name)").eq("org_id", orgId!).gte("created_at", `${today}T00:00:00`).order("check_in_time"),
+        canSeeFinancials
+          ? supabase.from("invoices").select("id, total, status, due_date").eq("org_id", orgId!).in("status", ["pending", "overdue"])
+          : Promise.resolve({ data: [] }),
+        canSeeFinancials
+          ? supabase.from("payments").select("amount, payment_date").eq("org_id", orgId!).gte("payment_date", weekAgo).lte("payment_date", today)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const staff = staffRes.data || [];
+      const assignedStaff = staff.find((member) => member.user_id === user?.id);
+      const payments = paymentsRes.data || [];
+      const paymentSeries = Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(Date.now() - (6 - index) * 86400000);
+        const key = format(date, "yyyy-MM-dd");
+        return {
+          label: format(date, "EEE"),
+          value: payments.filter((payment) => payment.payment_date === key).reduce((sum, payment) => sum + Number(payment.amount), 0),
+        };
+      });
+
+      const invoices = invoicesRes.data || [];
+      return {
+        assignedStaffId: assignedStaff?.id || null,
+        activeDentists: staff.filter((member) => member.role === "dentist" && member.status === "active").length,
+        treatmentCount: treatmentsRes.count || 0,
+        recallsDue: (recallsRes.data || []).length,
+        queue: (queueRes.data || []) as Array<{ id: string; status: string; check_in_time: string; chair: string | null; patients?: { first_name: string; last_name: string } }>,
+        pendingInvoiceCount: invoices.length,
+        pendingInvoiceValue: invoices.reduce((sum, invoice) => sum + Number(invoice.total), 0),
+        todayCollections: payments.filter((payment) => payment.payment_date === today).reduce((sum, payment) => sum + Number(payment.amount), 0),
+        paymentSeries,
+      };
     },
   });
 }
