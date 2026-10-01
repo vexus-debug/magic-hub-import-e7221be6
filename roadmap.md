@@ -8,4 +8,4 @@
 - [x] Create owner, dentist, and receptionist dental dashboard views.
 - [x] Add the day card, scrollable KPI strip, sparklines, action-first cards, and daily insight.
 - [x] Add the empty-clinic onboarding checklist and odontogram empty state.
-- [ ] Verify the upgraded dental dashboard at desktop and phone sizes.
+- [x] Verify the upgraded dental dashboard at desktop and phone sizes.
