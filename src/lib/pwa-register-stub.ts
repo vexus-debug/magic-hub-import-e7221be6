@@ -1,4 +1,5 @@
 interface RegisterOptions {
+  immediate?: boolean;
   onNeedRefresh?: () => void;
   onOfflineReady?: () => void;
 }
